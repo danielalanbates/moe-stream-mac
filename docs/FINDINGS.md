@@ -39,4 +39,20 @@ Non-expert weights ≈ 3.5 GB (must be resident) + KV.
 
 ## Results
 
-(filled in below as runs complete)
+**Verdict (2026-08-28): does not fit on the 8 GB M1.** All runs below used `--moe-stream-cache 24s`
+(the minimum the PR accepts: 3 × n_expert_used slots per layer; `1` GiB gave 14 slots and aborts
+at graph reserve). 24 slots × 40 layers × ~2 MB ≈ 1.9 GB of cache.
+
+| run | flags | outcome |
+|---|---|---|
+| run2/3 | `--moe-stream-cache 1 --no-mmap` | abort: "need 24 slots, have 14" |
+| run4 | `24s --no-mmap` (Metal) | 4 s into load: swap +960 MB, free 94 MB → watchdog kill. **This is what took the whole Mac down on the unguarded attempt.** |
+| run6 | `24s -ngl 0` (mmap, CPU) | loads, emits ~10 tokens of thinking in ~85 s (~0.1 tok/s), then swap +950 MB → watchdog kill |
+
+Arithmetic: ~3.5 GB non-expert weights resident + 1.9 GB expert cache + KV/compute buffers
+≈ 6 GB, against ~1.7–3.4 GB actually free on this machine with the desktop up. mmap only
+delays the death — the resident weights get paged back in every token.
+
+What would work: a 16 GB+ Mac (same drive, same scripts), or a much smaller MoE
+(e.g. a ~10–16 B-total A2B model whose dense part is < 1.5 GB). Any run on this machine must go
+through `scripts/bench-safe.sh` (swap-delta watchdog) — never bare `llama-cli`.
