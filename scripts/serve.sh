@@ -1,8 +1,14 @@
 #!/bin/bash
-# Serve the model with experts streamed from the external drive. OpenAI-compatible on $PORT.
+# Serve the drive-resident model. OpenAI-compatible API + web UI on http://localhost:$PORT
+# Weights: mmap'd straight off the drive.  KV cache: saved/restored to $MEMORY/kv (on the drive).
 set -euo pipefail
-. "$(dirname "$0")/env.sh"
-if pgrep -f "llama-server.*moe-stream" >/dev/null; then echo "already running (one instance rule)"; exit 1; fi
-exec "$LLAMA_DIR/build/bin/llama-server" -m "$MODEL" \
-  --moe-stream --moe-stream-cache "$CACHE_GIB" --moe-stream-io-threads "$IO_THREADS" \
-  --no-mmap --no-warmup -c "$CTX" --port "$PORT" "$@"
+. "$(dirname "$0")/env.sh"; eval "$("$(dirname "$0")/pick-model.sh")"
+if pgrep -f "llama-server.*--port $PORT" >/dev/null; then echo "already running on :$PORT (one instance rule)"; exit 0; fi
+LOG="$LOGS/server.log"; echo "host ${HOST_GB}GB -> $(basename "$MODEL") $EXTRA" | tee "$LOG"
+"$BIN/llama-server" -m "$MODEL" $EXTRA --no-warmup -c "$CTX" --port "$PORT" --host 127.0.0.1 \
+  --slot-save-path "$MEMORY/kv" --slots --cache-reuse 256 -ctk q8_0 -ctv q8_0 "$@" >>"$LOG" 2>&1 &
+PID=$!; echo $PID > "$LOGS/server.pid"
+"$(dirname "$0")/guard.sh" $PID >>"$LOGS/guard.log" 2>&1 &
+sleep 0.5
+for i in $(seq 1 120); do curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 && { echo "ready: http://localhost:$PORT (pid $PID)"; exit 0; }; kill -0 $PID 2>/dev/null || { echo "server died, see $LOG"; exit 1; }; sleep 1; done
+echo "timeout waiting for /health"; exit 1

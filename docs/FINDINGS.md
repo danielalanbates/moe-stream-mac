@@ -56,3 +56,24 @@ delays the death — the resident weights get paged back in every token.
 What would work: a 16 GB+ Mac (same drive, same scripts), or a much smaller MoE
 (e.g. a ~10–16 B-total A2B model whose dense part is < 1.5 GB). Any run on this machine must go
 through `scripts/bench-safe.sh` (swap-delta watchdog) — never bare `llama-cli`.
+
+
+## What works (2026-08-28, same 8 GB M1, drive-resident layout)
+
+| | |
+|---|---|
+| Model | Qwen3-4B-Instruct-2507 Q4_K_M (2.5 GB, native unsloth GGUF), mmap'd from `/Volumes/x10` |
+| Server RSS | ~3 MB resident (weights are page cache, fully evictable) |
+| Prompt eval | ~136 tok/s |
+| Generation | 13–15 tok/s |
+| Memory recall | correct 3/3 (dog name+breed, favourite drink, door colour) via SQLite FTS5 on the drive |
+| Guard | 0 kills with `SWAP_DELTA_MB=2500`; the earlier 900 MB threshold false-fired because macOS swaps *other* apps' idle pages to make room for file cache — that is normal, not a runaway |
+| Also running | FFXI (horizon-loader + xi_map, ~1.2 GB) and two Claude sessions — the AI coexisted with them |
+
+Ollama blobs: `qwen3:4b` (arch `qwen3`) loads fine; `qwen3.5:4b` and `qwen3.6:35b` (arch `qwen35*`)
+do not (`missing tensor blk.0.ssm_dt.bias` — converter divergence). Rule: **Ollama blobs of
+Qwen3.5+ are unusable in llama.cpp; download native GGUFs.**
+
+Thinking models: `Qwen3-4B-Thinking-2507` ignores `--reasoning-budget 0` and burns 500+ tokens
+before answering (content came back empty at 512 max_tokens). Use an *Instruct* model for the
+"final answer only" contract.

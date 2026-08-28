@@ -12,3 +12,7 @@ logs/
 *.local
 config.local.sh
 .DS_Store
+# personal memory / KV state — never commit
+memory/
+*.db
+*.pid

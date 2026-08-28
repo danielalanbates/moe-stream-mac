@@ -1,41 +1,52 @@
-# moe-stream-mac
+# moe-stream-mac — a self-contained AI on an external USB drive
 
-Run a Mixture-of-Experts LLM that is far larger than your Mac's RAM by keeping the
-model on an external USB SSD and streaming only the active experts per token.
-Target machine: **M1 MacBook Pro, 8 GB unified memory, 4 TB USB 3.2 Gen 2 SSD** —
-consumer hardware, no CUDA.
+Plug a USB SSD into any Apple-silicon Mac (or, with a CPU build, any x86 box — no CUDA)
+and get a working local AI whose **weights, working memory, long-term memory and logs all
+live on the drive**. The host contributes CPU/GPU cycles and a few GB of RAM; the user
+gets only the final answer.
 
-Built on top of llama.cpp **PR #25294** (`--moe-stream`, by @freedomljc), the most
-complete of the expert-streaming prototypes. This repo adds the glue, the patches that
-make it load real-world GGUFs, an 8 GB memory recipe, measured numbers, and a written
-plan for whoever continues the work (human or AI). See `docs/`.
-
-## Quick start
-
-```bash
-scripts/build.sh            # clones the PR branch to the external drive, patches, builds (Metal)
-scripts/download-model.sh   # Qwen3.5-35B-A3B Q4_K_M (22 GB) from HuggingFace
-scripts/bench.sh 64 1       # 64 tokens, 1 GiB expert cache — prints tok/s
-scripts/serve.sh            # OpenAI-compatible server on :8080
+```
+/Volumes/x10/LLMs/moe-stream/          (= $MOE_WORK, the drive)
+├── llama.cpp/build/bin/   runtime (llama.cpp PR #25294 --moe-stream, Metal + CPU)
+├── models/*.gguf          weight files, mmap'd straight off the drive (never copied to RAM)
+├── memory/memory.db       long-term memory: SQLite FTS5, every Q/A + explicit facts
+├── memory/kv/             KV-cache slot saves (the model's working memory, on the drive)
+└── logs/                  server.log, guard.log
 ```
 
-Everything lives under `MOE_WORK` (default `/Volumes/x10/LLMs/moe-stream`) so the internal
-disk isn't touched. Override paths in `config.local.sh` (gitignored).
+## Use
 
-## What "streaming" means here
+```bash
+scripts/serve.sh                     # picks the model that fits THIS host's RAM, serves :8080 (API + web UI)
+scripts/ask "What's my dog's name?"  # memory recall -> model -> stores the turn -> prints ONLY the answer
+scripts/drive_ai.py remember "..."   # store a fact
+scripts/drive_ai.py recall  "..."    # see what memory would inject
+scripts/stop.sh
+```
+Or double-click **Drive AI.app** (in /Applications; built by `scripts/make-app.sh`) — it starts
+the server from the drive and opens the chat UI.
 
-A 35B-A3B MoE has 256 experts per layer but only 8 fire per token. The 20 GB of expert
-weights stay on the SSD; a small per-layer slot cache (1–2 GiB) holds the hot experts;
-misses are fetched with large explicit `pread`s by an I/O thread pool while the graph
-waits. Routing is unchanged, so outputs are identical to a fully-resident run — only
-latency differs. The shared (non-expert) weights and KV cache still live in RAM.
+First run on a new machine: `scripts/run-from-drive.sh` (builds llama.cpp on the drive if
+needed, needs Xcode CLT). Everything is relative to `MOE_WORK`; override in `config.local.sh`.
 
-## Status
+## How it copes with small RAM
 
-See `docs/FINDINGS.md` for measured results and `docs/PATHWAYS.md` for what to do next.
+| RAM on host | model picked by `pick-model.sh` | mechanism |
+|---|---|---|
+| 8 GB | Qwen3-4B-Instruct Q4 (2.5 GB) | plain mmap; ~13 tok/s on M1 |
+| 16 GB | Qwen3.5-35B-A3B Q4 (22 GB) | `--moe-stream`: experts streamed per token, 24 slots/layer |
+| 32 GB+ | same, 4 GiB expert cache | |
+
+`scripts/guard.sh` runs beside every server and kills it if swap grows > 2.5 GB or free RAM
+< 200 MB. **Never run llama-* bare on an 8 GB host** — an unguarded run rebooted the Mac.
+
+## Status / plan
+- `docs/FINDINGS.md` — measured numbers, what fits and what doesn't, and why.
+- `docs/PATHWAYS.md` — ranked next steps + the GitHub projects worth building on.
+- `docs/HANDOFF.md` — for the next AI/human: state of the tree, how to verify, gotchas.
+- `archive/` — attempts that did not work on this hardware, kept for reference.
 
 ## License
 
 PolyForm Noncommercial 1.0.0 + commercial rider (10% of revenue). All rights reserved,
 Copyright (c) 2026 Daniel Bates / Bates LLC. Contact help@batesai.org · https://batesai.org.
-llama.cpp itself is MIT (ggml-org); the PR branch is @freedomljc's work.
