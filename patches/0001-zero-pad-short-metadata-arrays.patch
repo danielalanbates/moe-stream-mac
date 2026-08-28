@@ -1,0 +1,24 @@
+diff --git a/src/llama-model-loader.cpp b/src/llama-model-loader.cpp
+index 0d6e3d9..311ab02 100644
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -460,6 +460,19 @@ namespace GGUFMeta {
+                 GGUFMeta::GKV<GGUFMeta::ArrayInfo>::get_kv(metadata, kid);
+ 
+             if (n != arr_info.length) {
++                // moe-stream-mac: tolerate shorter arrays (e.g. Ollama-converted Qwen3.5 GGUFs write
++                // 3 mrope sections where llama.cpp expects 4) - pad the tail with zeros
++                if (arr_info.length < n) {
++                    LLAMA_LOG_WARN("%s: key %s has array length %u, expected %u - zero-padding\n", __func__, key.c_str(), (uint32_t) arr_info.length, n);
++                    std::array<T, N_MAX> tmp{};
++                    if (!get_arr(key, tmp, required)) {
++                        return false;
++                    }
++                    for (uint32_t i = 0; i < n; i++) {
++                        result[i] = i < arr_info.length ? tmp[i] : T{};
++                    }
++                    return true;
++                }
+                 throw std::runtime_error(format("key %s has wrong array length; expected %u, got %u", key.c_str(), n, (uint32_t) arr_info.length));
+             }
+ 

@@ -1,0 +1,14 @@
+# models / big binaries — never commit
+*.gguf
+*.bin
+*.safetensors
+# build + run artefacts
+llama.cpp/
+build/
+*.log
+logs/
+# local machine paths / secrets
+.env
+*.local
+config.local.sh
+.DS_Store
